@@ -18,6 +18,8 @@ export interface CallData {
   communication_score: number;
   process_adherence_score: number;
   sales_skills_score: number;
+  coaching_feedback: string[];
+  department?: 'Food & Beverages' | 'Ambience & Hygiene' | 'Booking & Billing' | 'Staff & Service';
 }
 
 const AGENTS_WITH_TLS = [
@@ -44,6 +46,19 @@ const CATEGORIES = [
   'Unrelated / Miscellaneous / Feedback'
 ];
 
+const FEEDBACK_TAGS = [
+  'Missed Greeting Protocol',
+  'Failed to identify booking urgency',
+  'Did not mention Weekend Value offers',
+  'Tone sounded disinterested',
+  'Poor handling of price objection',
+  'Did not confirm outlet location clearly',
+  'Missed opportunity for cross-selling beverages',
+  'Rushed through the menu options',
+  'Failed to capture alternative contact number',
+  'Long hold time without checking back'
+];
+
 export function generateMockData(): CallData[] {
   const data: CallData[] = [];
   const totalRows = 1126;
@@ -53,7 +68,7 @@ export function generateMockData(): CallData[] {
     const isExcellent = i < 510;
     const isGood = i >= 510 && i < 914;
     const isAverage = i >= 914 && i < 1064;
-    
+
     let tag: 'Excellent' | 'Good' | 'Average' | 'Poor';
     let score: number;
 
@@ -77,12 +92,23 @@ export function generateMockData(): CallData[] {
     const callTime = subDays(now, Math.random() * 30); // Last 30 days for MoM/WoW
     const duration = Math.floor(Math.random() * (580 - 18 + 1)) + 18;
     const hasIssue = Math.random() < 0.04;
-    
+
     const convertedRand = Math.random();
     const crs_booking_status = convertedRand > 0.6 ? 'Converted' : (convertedRand > 0.3 ? 'Non-Converted' : 'Pending');
-    
+
     const intentRand = Math.random();
     const initial_intent_tag = intentRand > 0.7 ? 'High Intent' : (intentRand > 0.3 ? 'Medium Intent' : 'Low Intent');
+
+    const DEPARTMENTS = ['Food & Beverages', 'Ambience & Hygiene', 'Booking & Billing', 'Staff & Service'] as const;
+    const department = DEPARTMENTS[Math.floor(Math.random() * DEPARTMENTS.length)];
+
+    // Generate random feedback tags (more likely if score is lower)
+    const feedbackCount = score > 90 ? (Math.random() > 0.8 ? 1 : 0) :
+      score > 70 ? Math.floor(Math.random() * 2) + 1 :
+        Math.floor(Math.random() * 3) + 2;
+
+    const shuffledTags = [...FEEDBACK_TAGS].sort(() => 0.5 - Math.random());
+    const coaching_feedback = shuffledTags.slice(0, feedbackCount);
 
     data.push({
       id: `call-${i}`,
@@ -102,6 +128,8 @@ export function generateMockData(): CallData[] {
       communication_score: Math.floor(Math.random() * 26),
       process_adherence_score: Math.floor(Math.random() * 41),
       sales_skills_score: Math.floor(Math.random() * 51),
+      coaching_feedback,
+      department,
     });
   }
 
