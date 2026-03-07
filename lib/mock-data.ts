@@ -1,4 +1,4 @@
-import { subDays, format, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
 
 export interface CallData {
   id: string;
@@ -15,123 +15,101 @@ export interface CallData {
   booking_urgency: 'High' | 'Medium' | 'Low';
   crs_booking_status: 'Converted' | 'Non-Converted' | 'Pending';
   initial_intent_tag: 'High Intent' | 'Medium Intent' | 'Low Intent';
+  customer_experience_score: number;
   communication_score: number;
-  process_adherence_score: number;
-  sales_skills_score: number;
+  sales_strategy_score: number;
   coaching_feedback: string[];
   department?: 'Food & Beverages' | 'Ambience & Hygiene' | 'Booking & Billing' | 'Staff & Service';
+  conversation_summary: string;
+  key_highlights: string[];
+  areas_of_improvement: string[];
 }
 
-const AGENTS_WITH_TLS = [
-  { name: 'AdityaR', tl: 'Vikram Singh' },
-  { name: 'ArfaR', tl: 'Vikram Singh' },
-  { name: 'SumanK', tl: 'Priya Sharma' },
-  { name: 'GazalaS', tl: 'Priya Sharma' },
-  { name: 'SufiyanA', tl: 'Rahul Verma' },
-  { name: 'Vidyashree', tl: 'Rahul Verma' },
-  { name: 'SayedaS', tl: 'Anjali Gupta' },
-  { name: 'KrishnaM', tl: 'Anjali Gupta' },
-  { name: 'SurbhiJ', tl: 'Suresh Kumar' },
-  { name: 'RichaP', tl: 'Suresh Kumar' }
-];
+export async function fetchCallData(): Promise<CallData[]> {
+  try {
+    const res = await fetch('/sales_data.json');
+    if (!res.ok) throw new Error('Failed to fetch data');
+    const rawData = await res.json();
 
-const OUTLETS = [
-  'Garia', 'Jaipur', 'Bangalore', 'Noida', 'Pune', 'Hyderabad', 'Chennai', 'Kolkata', 'Mumbai', 'Delhi'
-];
+    return rawData.map((row: any) => {
+      // Parse nested JSON strings safely
+      const transcript = row.transcription ? JSON.parse(row.transcription) : {};
+      const analysis = row.analysis ? JSON.parse(row.analysis) : {};
+      const intent = row.analysis_intent ? JSON.parse(row.analysis_intent) : {};
 
-const CATEGORIES = [
-  'New Booking Related Call',
-  'Existing Reservation',
-  'Food Delivery & Takeaway',
-  'Unrelated / Miscellaneous / Feedback'
-];
+      // Parse the scores from formats like "25/25"
+      const customer_experience_score = parseInt(row.communication_score?.toString().split('/')[0] || '0');
+      const communication_score = parseInt(row.process_adherence_score?.toString().split('/')[0] || '0');
+      const sales_strategy_score = parseInt(row.sales_skills_score?.toString().split('/')[0] || '0');
 
-const FEEDBACK_TAGS = [
-  'Missed Greeting Protocol',
-  'Failed to identify booking urgency',
-  'Did not mention Weekend Value offers',
-  'Tone sounded disinterested',
-  'Poor handling of price objection',
-  'Did not confirm outlet location clearly',
-  'Missed opportunity for cross-selling beverages',
-  'Rushed through the menu options',
-  'Failed to capture alternative contact number',
-  'Long hold time without checking back'
-];
+      // Map TL safely
+      const tl_name = row.tl_name || 'Vikram Singh'; // fallback if empty
 
-export function generateMockData(): CallData[] {
-  const data: CallData[] = [];
-  const totalRows = 1126;
-  const now = new Date();
+      // Determine department (mocking somewhat since not present in JSON natively, default to Booking)
+      const department: CallData['department'] = 'Booking & Billing';
 
-  for (let i = 0; i < totalRows; i++) {
-    const isExcellent = i < 510;
-    const isGood = i >= 510 && i < 914;
-    const isAverage = i >= 914 && i < 1064;
+      // Parse urgency
+      let booking_urgency: 'High' | 'Medium' | 'Low' = 'Medium';
+      if (row.booking_urgency) {
+        booking_urgency = row.booking_urgency as 'High' | 'Medium' | 'Low';
+      } else if (intent.intent_analysis?.initial_intent_tag) {
+        if (intent.intent_analysis.initial_intent_tag.includes('High')) booking_urgency = 'High';
+        if (intent.intent_analysis.initial_intent_tag.includes('Low')) booking_urgency = 'Low';
+      }
 
-    let tag: 'Excellent' | 'Good' | 'Average' | 'Poor';
-    let score: number;
+      // Initial Intent
+      const initial_intent_tag = intent.intent_analysis?.initial_intent_tag || 'Medium Intent';
 
-    if (isExcellent) {
-      tag = 'Excellent';
-      score = Math.floor(Math.random() * 11) + 90;
-    } else if (isGood) {
-      tag = 'Good';
-      score = Math.floor(Math.random() * 10) + 80;
-    } else if (isAverage) {
-      tag = 'Average';
-      score = Math.floor(Math.random() * 20) + 60;
-    } else {
-      tag = 'Poor';
-      score = Math.floor(Math.random() * 60);
-    }
+      // Coaching feedback array (keeping for raw data compatibility, but merging for display)
+      const coaching_feedback = analysis.coaching_feedback ? [analysis.coaching_feedback] : [];
 
-    const category = i < 1017 ? 'New Booking Related Call' : CATEGORIES[Math.floor(Math.random() * 3) + 1];
-    const agentObj = AGENTS_WITH_TLS[Math.floor(Math.random() * AGENTS_WITH_TLS.length)];
-    const outlet = OUTLETS[Math.floor(Math.random() * OUTLETS.length)];
-    const callTime = subDays(now, Math.random() * 30); // Last 30 days for MoM/WoW
-    const duration = Math.floor(Math.random() * (580 - 18 + 1)) + 18;
-    const hasIssue = Math.random() < 0.04;
+      // Highlights and areas of improvement
+      const conversation_summary = intent.intent_analysis?.intent_transition_summary || '';
+      const key_highlights = intent.retargeting_and_conversion_strategy?.retargeting_efforts?.map((e: any) => e.tag) || [];
 
-    const convertedRand = Math.random();
-    const crs_booking_status = convertedRand > 0.6 ? 'Converted' : (convertedRand > 0.3 ? 'Non-Converted' : 'Pending');
+      const areas_of_improvement: string[] = [];
+      if (analysis.elite_improvement_suggestions) areas_of_improvement.push(analysis.elite_improvement_suggestions);
+      if (analysis.coaching_feedback) areas_of_improvement.push(analysis.coaching_feedback);
 
-    const intentRand = Math.random();
-    const initial_intent_tag = intentRand > 0.7 ? 'High Intent' : (intentRand > 0.3 ? 'Medium Intent' : 'Low Intent');
+      // Infer outlet from the transcript text as a fallback
+      let outlet = row.outlet_location;
+      if (!outlet) {
+        const text = transcript.transcript_text || '';
+        if (text.includes('Chandigarh')) outlet = 'Chandigarh';
+        else if (text.includes('Noida')) outlet = 'Noida';
+        else if (text.includes('Thane')) outlet = 'Thane';
+        else if (text.includes('Muzaffarpur')) outlet = 'Muzaffarpur';
+        else if (text.includes('Worli') || text.includes('Mumbai')) outlet = 'Mumbai';
+        else outlet = 'Unknown';
+      }
 
-    const DEPARTMENTS = ['Food & Beverages', 'Ambience & Hygiene', 'Booking & Billing', 'Staff & Service'] as const;
-    const department = DEPARTMENTS[Math.floor(Math.random() * DEPARTMENTS.length)];
-
-    // Generate random feedback tags (more likely if score is lower)
-    const feedbackCount = score > 90 ? (Math.random() > 0.8 ? 1 : 0) :
-      score > 70 ? Math.floor(Math.random() * 2) + 1 :
-        Math.floor(Math.random() * 3) + 2;
-
-    const shuffledTags = [...FEEDBACK_TAGS].sort(() => 0.5 - Math.random());
-    const coaching_feedback = shuffledTags.slice(0, feedbackCount);
-
-    data.push({
-      id: `call-${i}`,
-      agent_username: agentObj.name,
-      tl_name: agentObj.tl,
-      outlet_location: outlet,
-      call_duration: duration,
-      call_time: format(callTime, 'yyyy-MM-dd HH:mm:ss'),
-      final_score: score,
-      final_score_tag: tag,
-      call_category: category,
-      major_language_clarity_or_technical_issue: hasIssue,
-      lead_score: Math.floor(Math.random() * 101),
-      booking_urgency: Math.random() > 0.7 ? 'High' : (Math.random() > 0.4 ? 'Medium' : 'Low'),
-      crs_booking_status,
-      initial_intent_tag,
-      communication_score: Math.floor(Math.random() * 26),
-      process_adherence_score: Math.floor(Math.random() * 41),
-      sales_skills_score: Math.floor(Math.random() * 51),
-      coaching_feedback,
-      department,
+      return {
+        id: row.id || Math.random().toString(),
+        agent_username: row.agent_username || 'Unknown',
+        tl_name,
+        outlet_location: outlet,
+        call_duration: parseInt(row.call_duration?.toString() || '0'),
+        call_time: row.call_time || new Date().toISOString(),
+        final_score: parseInt(row.final_score?.toString() || '0'),
+        final_score_tag: (row.final_score_tag as 'Excellent' | 'Good' | 'Average' | 'Poor') || 'Average',
+        call_category: row.call_category || transcript.call_category || 'New Booking Related Call',
+        major_language_clarity_or_technical_issue: row.major_language_clarity_or_technical_issue || transcript.major_language_clarity_or_technical_issue || false,
+        lead_score: parseFloat(row.lead_score?.toString() || '0'),
+        booking_urgency,
+        crs_booking_status: (row.crs_booking_status as 'Converted' | 'Non-Converted' | 'Pending') || intent.intent_analysis?.final_intent_status || 'Pending',
+        initial_intent_tag,
+        customer_experience_score: isNaN(customer_experience_score) ? 0 : customer_experience_score,
+        communication_score: isNaN(communication_score) ? 0 : communication_score,
+        sales_strategy_score: isNaN(sales_strategy_score) ? 0 : sales_strategy_score,
+        coaching_feedback,
+        department,
+        conversation_summary,
+        key_highlights,
+        areas_of_improvement
+      };
     });
+  } catch (error) {
+    console.error('Error fetching real data:', error);
+    return [];
   }
-
-  return data.sort((a, b) => parseISO(a.call_time).getTime() - parseISO(b.call_time).getTime());
 }

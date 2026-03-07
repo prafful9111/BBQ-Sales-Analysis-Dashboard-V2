@@ -41,11 +41,12 @@ import {
   Eye
 } from 'lucide-react';
 import { format, parseISO, startOfDay, eachDayOfInterval, subDays } from 'date-fns';
-import { CallData, generateMockData } from '@/lib/mock-data';
+import { CallData, fetchCallData } from '@/lib/mock-data';
 import Sidebar from './Sidebar';
 import AgentPerformancePage from './AgentPerformancePage';
 import CallLogsPage from './CallLogsPage';
 import TrendsPage from './TrendsPage';
+import TeamLeadPage from './TeamLeadPage';
 import { cn } from '@/lib/utils';
 
 // BBQ Nation Color Palette
@@ -85,16 +86,25 @@ export default function SalesDashboard() {
   const [selectedLossReason, setSelectedLossReason] = React.useState<string>('');
 
   React.useEffect(() => {
-    setData(generateMockData());
-    setIsMounted(true);
+    fetchCallData().then((fetchedData) => {
+      setData(fetchedData);
+      setIsMounted(true);
+    });
   }, []);
+
+  // Find the latest date in the dataset to act as "now", so static data doesn't appear empty today
+  const maxDate = React.useMemo(() => {
+    if (!data || data.length === 0) return new Date();
+    const maxTime = Math.max(...data.map(d => parseISO(d.call_time).getTime()));
+    return new Date(maxTime);
+  }, [data]);
 
   // Filtered Data
   const filteredData = React.useMemo(() => {
     return data.filter(item => {
       // Date Filter
       const callDate = parseISO(item.call_time);
-      const now = new Date();
+      const now = maxDate;
       let matchDate = true;
       if (filterDateRange === 'Last 7 Days') {
         matchDate = callDate >= subDays(now, 7);
@@ -130,7 +140,7 @@ export default function SalesDashboard() {
 
   // Comparison Data (WoW / MoM)
   const comparisonData = React.useMemo(() => {
-    const now = new Date();
+    const now = maxDate;
     let currentInterval: { start: Date; end: Date };
     let previousInterval: { start: Date; end: Date };
 
@@ -156,8 +166,8 @@ export default function SalesDashboard() {
       if (total === 0) return { volume: 0, score: 0, conv: 0, intent: 0, process: 0 };
       const score = items.reduce((acc, curr) => acc + curr.final_score, 0) / total;
       const conv = (items.filter(d => d.crs_booking_status === 'Converted').length / total) * 100;
-      const intent = (items.filter(d => d.initial_intent_tag === 'High Intent').length / total) * 100;
-      const process = (items.reduce((acc, curr) => acc + curr.process_adherence_score, 0) / (total * 40)) * 100;
+      const intent = (items.filter(d => d.initial_intent_tag.includes('High')).length / total) * 100;
+      const process = (items.reduce((acc, curr) => acc + curr.communication_score, 0) / (total * 40)) * 100;
       return { volume: total, score, conv, intent, process };
     };
 
@@ -211,13 +221,13 @@ export default function SalesDashboard() {
     const avgDuration = filteredData.reduce((acc, curr) => acc + curr.call_duration, 0) / totalCalls;
     const convertedCount = filteredData.filter(d => d.crs_booking_status === 'Converted').length;
     const conversionRate = (convertedCount / totalCalls) * 100;
-    const highIntentCount = filteredData.filter(d => d.initial_intent_tag === 'High Intent').length;
+    const highIntentCount = filteredData.filter(d => d.initial_intent_tag.includes('High')).length;
     const highIntentPercent = (highIntentCount / totalCalls) * 100;
     const avgLeadScore = filteredData.reduce((acc, curr) => acc + curr.lead_score, 0) / totalCalls;
-    const avgProcess = filteredData.reduce((acc, curr) => acc + curr.process_adherence_score, 0) / totalCalls;
-    const avgSales = filteredData.reduce((acc, curr) => acc + curr.sales_skills_score, 0) / totalCalls;
+    const avgProcess = filteredData.reduce((acc, curr) => acc + curr.communication_score, 0) / totalCalls;
+    const avgSales = filteredData.reduce((acc, curr) => acc + curr.sales_strategy_score, 0) / totalCalls;
     const technicalIssues = filteredData.filter(d => d.major_language_clarity_or_technical_issue).length;
-    const missedOpportunities = filteredData.filter(d => d.initial_intent_tag === 'High Intent' && d.crs_booking_status !== 'Converted').length;
+    const missedOpportunities = filteredData.filter(d => d.initial_intent_tag.includes('High') && d.crs_booking_status !== 'Converted').length;
 
     return {
       totalCalls,
@@ -259,7 +269,8 @@ export default function SalesDashboard() {
     });
     return Object.entries(tagCounts)
       .map(([reason, count]) => ({ reason, count }))
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Limit to top 5 to avoid clutter
   }, [filteredData]);
 
   // Chart Data: Performance Distribution (Funnel)
@@ -302,8 +313,8 @@ export default function SalesDashboard() {
         acc[curr.agent_username] = { total: 0, count: 0, sales: 0, process: 0 };
       }
       acc[curr.agent_username].total += curr.final_score;
-      acc[curr.agent_username].sales += curr.sales_skills_score;
-      acc[curr.agent_username].process += curr.process_adherence_score;
+      acc[curr.agent_username].sales += curr.sales_strategy_score;
+      acc[curr.agent_username].process += curr.communication_score;
       acc[curr.agent_username].count += 1;
       return acc;
     }, {} as Record<string, any>);
@@ -322,8 +333,8 @@ export default function SalesDashboard() {
   // Chart Data: Temporal Trend
   const temporalData = React.useMemo(() => {
     const last7Days = eachDayOfInterval({
-      start: subDays(new Date(), 6),
-      end: new Date()
+      start: subDays(maxDate, 6),
+      end: maxDate
     });
     const dayCounts = filteredData.reduce((acc, curr) => {
       const day = format(parseISO(curr.call_time), 'MMM dd');
@@ -393,9 +404,9 @@ export default function SalesDashboard() {
       const s = acc[curr.agent_username];
       s.totalScore += curr.final_score;
       s.count += 1;
-      s.salesTotal += curr.sales_skills_score;
-      s.processTotal += curr.process_adherence_score;
-      s.commTotal += curr.communication_score;
+      s.salesTotal += curr.sales_strategy_score;
+      s.processTotal += curr.communication_score;
+      s.commTotal += curr.customer_experience_score;
       if (curr.final_score > s.bestScore) s.bestScore = curr.final_score;
       if (curr.crs_booking_status === 'Converted') s.converted += 1;
       return acc;
@@ -437,9 +448,9 @@ export default function SalesDashboard() {
       const s = acc[curr.agent_username];
       s.totalScore += curr.final_score;
       s.count += 1;
-      s.salesTotal += curr.sales_skills_score;
-      s.processTotal += curr.process_adherence_score;
-      s.commTotal += curr.communication_score;
+      s.salesTotal += curr.sales_strategy_score;
+      s.processTotal += curr.communication_score;
+      s.commTotal += curr.customer_experience_score;
       if (curr.crs_booking_status === 'Converted') s.converted += 1;
       if (curr.coaching_feedback) {
         curr.coaching_feedback.forEach((tag: string) => {
@@ -506,6 +517,42 @@ export default function SalesDashboard() {
       .slice(0, 4);
   }, [filteredData]);
 
+  // Booking Urgency Distribution
+  const urgencyDistribution = React.useMemo(() => {
+    const total = filteredData.length || 1;
+    const high = filteredData.filter(d => d.booking_urgency === 'High').length;
+    const medium = filteredData.filter(d => d.booking_urgency === 'Medium').length;
+    const low = filteredData.filter(d => d.booking_urgency === 'Low').length;
+    return [
+      { name: 'High', value: high, percentage: ((high / total) * 100).toFixed(1), color: '#ef4444' },
+      { name: 'Medium', value: medium, percentage: ((medium / total) * 100).toFixed(1), color: '#f59e0b' },
+      { name: 'Low', value: low, percentage: ((low / total) * 100).toFixed(1), color: '#94a3b8' },
+    ];
+  }, [filteredData]);
+
+  // Lead Score Distribution (histogram buckets)
+  const leadScoreDistribution = React.useMemo(() => {
+    const buckets = [
+      { range: '0-20', min: 0, max: 20, count: 0, color: '#ef4444' },
+      { range: '21-40', min: 21, max: 40, count: 0, color: '#f97316' },
+      { range: '41-60', min: 41, max: 60, count: 0, color: '#f59e0b' },
+      { range: '61-80', min: 61, max: 80, count: 0, color: '#3b82f6' },
+      { range: '81-100', min: 81, max: 100, count: 0, color: '#8b5cf6' },
+    ];
+    filteredData.forEach(d => {
+      const bucket = buckets.find(b => d.lead_score >= b.min && d.lead_score <= b.max);
+      if (bucket) bucket.count++;
+    });
+    return buckets;
+  }, [filteredData]);
+
+  // Technical Issue Rate
+  const technicalIssueRate = React.useMemo(() => {
+    const total = filteredData.length || 1;
+    const issues = filteredData.filter(d => d.major_language_clarity_or_technical_issue).length;
+    return { count: issues, rate: ((issues / total) * 100).toFixed(1) };
+  }, [filteredData]);
+
   const agents = Array.from(new Set(data.map(d => d.agent_username))).sort();
   const categories = Array.from(new Set(data.map(d => d.call_category))).sort();
 
@@ -534,7 +581,7 @@ export default function SalesDashboard() {
         collapsed ? "ml-20" : "ml-[260px]"
       )}>
         {/* Main Content Area */}
-        {(activePage === 'overview' || activePage === 'calls' || activePage === 'trends' || activePage === 'agents') && (
+        {(activePage === 'overview' || activePage === 'calls' || activePage === 'trends' || activePage === 'agents' || activePage === 'teamleads') && (
           <>
             {/* Top Header */}
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
@@ -561,6 +608,12 @@ export default function SalesDashboard() {
                     <p className="text-slate-500 text-sm mt-1">Monitor improvements over time</p>
                   </>
                 )}
+                {activePage === 'teamleads' && (
+                  <>
+                    <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Team <span className="text-[#E35205]">Leads</span></h1>
+                    <p className="text-slate-500 text-sm mt-1">Team-level performance comparison and coaching insights</p>
+                  </>
+                )}
                 {activePage === 'agents' && (
                   <>
                     <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Agent <span className="text-[#E35205]">Performance</span></h1>
@@ -573,9 +626,9 @@ export default function SalesDashboard() {
                 <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-100 uppercase tracking-wider">
                   <Calendar className="w-3.5 h-3.5 text-[#E35205]" />
                   <span>
-                    {filterDateRange === 'All' ? 'All Time' : 
-                     filterDateRange === 'Custom' ? `${customStartDate || 'Start'} - ${customEndDate || 'End'}` :
-                     filterDateRange}
+                    {filterDateRange === 'All' ? 'All Time' :
+                      filterDateRange === 'Custom' ? `${customStartDate || 'Start'} - ${customEndDate || 'End'}` :
+                        filterDateRange}
                   </span>
                 </div>
               </div>
@@ -951,7 +1004,7 @@ export default function SalesDashboard() {
 
                         {agent.improvements.length > 0 && (
                           <div>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Areas to Improve</p>
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Communication</span>
                             <div className="flex flex-wrap gap-1">
                               {agent.improvements.map((imp, j) => (
                                 <span key={j} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-100/60">
@@ -1093,6 +1146,123 @@ export default function SalesDashboard() {
             </div>
           </div>
 
+          {/* Booking Urgency Distribution & Lead Score Distribution & Tech Issues */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {/* Booking Urgency Distribution */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertCircle className="w-4 h-4 text-[#E35205]" />
+                <h3 className="text-base font-bold text-slate-800">Booking Urgency</h3>
+              </div>
+              <div className="flex flex-col items-center">
+                <div className="h-[220px] w-full" style={{ overflow: 'visible' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+                      <Pie
+                        data={urgencyDistribution}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        dataKey="value"
+                        strokeWidth={3}
+                        stroke="#fff"
+                        isAnimationActive={false}
+                        label={({ name, percentage }: any) => `${name} ${percentage}%`}
+                        labelLine={{ stroke: '#94a3b8', strokeWidth: 1 }}
+                      >
+                        {urgencyDistribution.map((entry, index) => (
+                          <Cell key={`urgency-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                        formatter={(value: any, name: any) => [`${value} calls`, name]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="grid grid-cols-3 gap-2 w-full mt-2">
+                  {urgencyDistribution.map((item) => (
+                    <div
+                      key={item.name}
+                      className="rounded-lg py-2 px-2 text-center border transition-all hover:shadow-sm"
+                      style={{ backgroundColor: `${item.color}08`, borderColor: `${item.color}25` }}
+                    >
+                      <div className="text-lg font-black" style={{ color: item.color }}>{item.value}</div>
+                      <div className="text-[10px] font-semibold text-slate-500">{item.name}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Lead Score Distribution */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+              <div className="flex items-center gap-2 mb-4">
+                <Zap className="w-4 h-4 text-[#E35205]" />
+                <h3 className="text-base font-bold text-slate-800">Lead Score Distribution</h3>
+              </div>
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={leadScoreDistribution}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="range" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} dy={8} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <Tooltip
+                      cursor={{ fill: '#f8fafc' }}
+                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                      formatter={(value: any) => [`${value} calls`, 'Count']}
+                    />
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]} barSize={36}>
+                      {leadScoreDistribution.map((entry, index) => (
+                        <Cell key={`lead-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Technical Issue Rate */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertTriangle className="w-4 h-4 text-[#E35205]" />
+                <h3 className="text-base font-bold text-slate-800">Technical Issues</h3>
+              </div>
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <div className="relative w-40 h-40 mb-4">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="#f1f5f9" strokeWidth="10" />
+                    <circle
+                      cx="50" cy="50" r="42" fill="none"
+                      stroke={parseFloat(technicalIssueRate.rate) > 5 ? '#ef4444' : '#10b981'}
+                      strokeWidth="10"
+                      strokeDasharray={`${parseFloat(technicalIssueRate.rate) * 2.64} ${264 - parseFloat(technicalIssueRate.rate) * 2.64}`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className={cn("text-2xl font-black",
+                      parseFloat(technicalIssueRate.rate) > 5 ? 'text-rose-600' : 'text-emerald-600'
+                    )}>{technicalIssueRate.rate}%</span>
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Issue Rate</span>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-bold text-slate-700">{technicalIssueRate.count} calls</p>
+                  <p className="text-xs text-slate-400 mt-0.5">flagged with language/technical issues</p>
+                </div>
+                <div className={cn(
+                  "mt-4 px-4 py-2 rounded-lg text-xs font-semibold",
+                  parseFloat(technicalIssueRate.rate) > 5 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                )}>
+                  {parseFloat(technicalIssueRate.rate) > 5 ? '⚠ Above 5% threshold — needs attention' : '✓ Within acceptable range'}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
             {/* Volume Trend */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-12">
@@ -1151,11 +1321,13 @@ export default function SalesDashboard() {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fontSize: 11, fill: '#334155', fontWeight: 500 }}
-                    width={260}
+                    width={200}
+                    tickFormatter={(val) => val.length > 30 ? val.substring(0, 30) + '...' : val}
                   />
                   <Tooltip
                     cursor={{ fill: '#f8fafc' }}
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px', whiteSpace: 'normal', maxWidth: '300px' }}
+                    labelStyle={{ color: '#0f172a', fontWeight: 'bold', marginBottom: '4px' }}
                     formatter={(value: any) => [`${value} calls`, 'Count']}
                   />
                   <Bar dataKey="count" radius={[0, 6, 6, 0]} barSize={28} cursor="pointer"
@@ -1181,7 +1353,7 @@ export default function SalesDashboard() {
 
         {activePage === 'agents' && (
           <AgentPerformancePage
-            data={data}
+            data={filteredData}
             selectedAgent={filterAgent}
             setSelectedAgent={setFilterAgent}
             goBack={() => setActivePage('overview')}
@@ -1196,129 +1368,259 @@ export default function SalesDashboard() {
           <TrendsPage data={filteredData} />
         )}
 
+        {activePage === 'teamleads' && (
+          <TeamLeadPage data={filteredData} />
+        )}
+
         {/* Reason for Loss Modal Content (Extracted for readability) */}
         {/* Call Details Modal */}
         {selectedCall && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto" onClick={() => setSelectedCall(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl min-h-[500px] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               {/* Modal Header */}
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-orange-50 to-white">
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-orange-50 to-white shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
                     <PhoneCall className="w-5 h-5 text-[#E35205]" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-slate-800">Call Details - {selectedCall.id}</h3>
-                    <p className="text-xs text-slate-500">{format(parseISO(selectedCall.call_time), 'PPpp')}</p>
+                    <h3 className="text-lg font-bold text-slate-800">Call Analysis Report — {selectedCall.id}</h3>
+                    <p className="text-xs text-slate-500">{format(parseISO(selectedCall.call_time), 'PPpp')} · {Math.floor(selectedCall.call_duration / 60)}m {(selectedCall.call_duration % 60).toString().padStart(2, '0')}s</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedCall(null)}
-                  className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                >
-                  <X className="w-5 h-5 text-slate-400" />
-                </button>
+                <div className="flex items-center gap-3">
+                  <span className={cn(
+                    "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+                    selectedCall.final_score >= 90 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                      selectedCall.final_score >= 75 ? "bg-blue-50 text-blue-700 border border-blue-200" :
+                        selectedCall.final_score >= 60 ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                          "bg-rose-50 text-rose-700 border border-rose-200"
+                  )}>{selectedCall.final_score_tag} · {selectedCall.final_score}/100</span>
+                  <button
+                    onClick={() => setSelectedCall(null)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5 text-slate-400" />
+                  </button>
+                </div>
               </div>
 
-              {/* Modal Body */}
-              <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Info Column */}
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Agent Information</h4>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Name</span>
-                        <span className="font-semibold text-slate-800">{selectedCall.agent_username}</span>
+              {/* Modal Body - Scrollable */}
+              <div className="overflow-y-auto flex-1 p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
+
+                {/* Section 1: Call Summary */}
+                <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-[#E35205] mb-4 flex items-center gap-2">
+                    <Phone className="w-3.5 h-3.5" /> Call Summary
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Agent</div>
+                      <div className="text-sm font-bold text-slate-800">{selectedCall.agent_username}</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Team Lead</div>
+                      <div className="text-sm font-bold text-slate-800">{selectedCall.tl_name}</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Outlet</div>
+                      <div className="text-sm font-bold text-slate-800">{selectedCall.outlet_location}</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Category</div>
+                      <div className="text-sm font-bold text-slate-800">{selectedCall.call_category}</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Department</div>
+                      <div className="text-sm font-bold text-[#E35205]">{selectedCall.department}</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Technical Issue</div>
+                      <div className={cn("text-sm font-bold", selectedCall.major_language_clarity_or_technical_issue ? "text-rose-600" : "text-emerald-600")}>
+                        {selectedCall.major_language_clarity_or_technical_issue ? 'Yes' : 'No'}
                       </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Team Lead</span>
-                        <span className="font-semibold text-slate-800">{selectedCall.tl_name}</span>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Duration</div>
+                      <div className="text-sm font-bold text-slate-800">{Math.floor(selectedCall.call_duration / 60)}m {(selectedCall.call_duration % 60).toString().padStart(2, '0')}s</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Customer Experience</div>
+                      <div className="text-sm font-bold text-slate-800">{selectedCall.customer_experience_score}/25</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Conversation Highlights */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="bg-white rounded-xl p-5 border border-slate-200">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#E35205] mb-4 flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5" /> Conversation Highlights
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="bg-gradient-to-br from-purple-50 to-white rounded-lg p-3 text-center border border-purple-100">
+                        <div className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-1">Lead Score</div>
+                        <div className="text-2xl font-black text-purple-700">{selectedCall.lead_score}</div>
                       </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Department</span>
-                        <span className="font-semibold text-[#E35205]">{selectedCall.department}</span>
+                      <div className="bg-gradient-to-br from-amber-50 to-white rounded-lg p-3 text-center border border-amber-100">
+                        <div className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider mb-1">Urgency</div>
+                        <div className={cn("text-lg font-black",
+                          selectedCall.booking_urgency === 'High' ? "text-rose-600" :
+                            selectedCall.booking_urgency === 'Medium' ? "text-amber-600" : "text-slate-500"
+                        )}>{selectedCall.booking_urgency}</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-slate-50 rounded-lg p-3 text-center">
+                        <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Booking Status</div>
+                        <span className={cn(
+                          "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                          selectedCall.crs_booking_status === 'Converted' ? "bg-emerald-100 text-emerald-700" :
+                            selectedCall.crs_booking_status === 'Non-Converted' ? "bg-rose-100 text-rose-700" :
+                              "bg-amber-100 text-amber-700"
+                        )}>
+                          {selectedCall.crs_booking_status === 'Converted' ? <CheckCircle2 className="w-3 h-3" /> :
+                            selectedCall.crs_booking_status === 'Non-Converted' ? <XCircle className="w-3 h-3" /> : null}
+                          {selectedCall.crs_booking_status}
+                        </span>
+                      </div>
+                      <div className="bg-slate-50 rounded-lg p-3 text-center">
+                        <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Intent</div>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                          selectedCall.initial_intent_tag === 'High Intent' ? "bg-orange-100 text-[#E35205]" :
+                            selectedCall.initial_intent_tag === 'Medium Intent' ? "bg-amber-100 text-amber-600" :
+                              "bg-slate-200 text-slate-600"
+                        )}>{selectedCall.initial_intent_tag}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Booking Details</h4>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Status</span>
-                        <span className={cn(
-                          "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
-                          selectedCall.crs_booking_status === 'Converted' ? "bg-emerald-50 text-emerald-700" :
-                            selectedCall.crs_booking_status === 'Non-Converted' ? "bg-rose-50 text-rose-700" :
-                              "bg-amber-50 text-amber-700"
-                        )}>{selectedCall.crs_booking_status}</span>
+                  {/* Agent Performance Evaluation */}
+                  <div className="bg-white rounded-xl p-5 border border-slate-200">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#E35205] mb-4 flex items-center gap-2">
+                      <Star className="w-3.5 h-3.5" /> Agent Performance Evaluation
+                    </h4>
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-600">Customer Experience</span>
+                          <span className="text-xs font-black text-slate-800">{selectedCall.customer_experience_score}/25</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2">
+                          <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${Math.min((selectedCall.customer_experience_score / 25) * 100, 100)}%` }}></div>
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Intent</span>
-                        <span className="font-semibold text-slate-800">{selectedCall.initial_intent_tag}</span>
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-600">Communication</span>
+                          <span className="text-xs font-black text-slate-800">{selectedCall.communication_score}/40</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2">
+                          <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${Math.min((selectedCall.communication_score / 40) * 100, 100)}%` }}></div>
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Outlet</span>
-                        <span className="font-semibold text-slate-800">{selectedCall.outlet_location}</span>
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-600">Sales Strategy</span>
+                          <span className="text-xs font-black text-slate-800">{selectedCall.sales_strategy_score}/50</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2">
+                          <div className="bg-[#E35205] h-2 rounded-full transition-all" style={{ width: `${Math.min((selectedCall.sales_strategy_score / 50) * 100, 100)}%` }}></div>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-slate-100 mt-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm font-bold text-slate-800">Final Score</span>
+                          <span className={cn("text-xl font-black",
+                            selectedCall.final_score >= 90 ? "text-emerald-600" :
+                              selectedCall.final_score >= 75 ? "text-blue-600" :
+                                selectedCall.final_score >= 60 ? "text-amber-600" : "text-rose-600"
+                          )}>{selectedCall.final_score}<span className="text-sm text-slate-400">/100</span></span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Performance Column */}
-                <div className="md:col-span-2 space-y-6">
-                  <div>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3 text-center">Quality Score Distribution</h4>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs text-slate-500 mb-1">Final Score</div>
-                        <div className="text-xl font-black text-slate-900">{selectedCall.final_score}</div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs text-slate-500 mb-1">Process</div>
-                        <div className="text-xl font-black text-slate-900">{selectedCall.process_adherence_score}</div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs text-slate-500 mb-1">Sales Skills</div>
-                        <div className="text-xl font-black text-slate-900">{selectedCall.sales_skills_score}</div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs text-slate-500 mb-1">Language</div>
-                        <div className="text-xl font-black text-slate-900">{selectedCall.communication_score}</div>
-                      </div>
-                    </div>
+                {/* Section 3: Conversation Summary */}
+                <div className="bg-gradient-to-br from-slate-50 to-white rounded-xl p-5 border border-slate-200">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-[#E35205] mb-3 flex items-center gap-2">
+                    <BookOpen className="w-3.5 h-3.5" /> Conversation Summary
+                  </h4>
+                  <p className="text-sm text-slate-700 leading-relaxed">{selectedCall.conversation_summary}</p>
+                </div>
+
+                {/* Section 4: Key Highlights & Areas of Improvement */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="bg-emerald-50/50 rounded-xl p-5 border border-emerald-100">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-emerald-700 mb-3 flex items-center gap-2">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Key Highlights
+                    </h4>
+                    {selectedCall.key_highlights.length > 0 ? (
+                      <ul className="space-y-2">
+                        {selectedCall.key_highlights.map((h, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                            {h}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">No notable highlights for this call.</p>
+                    )}
                   </div>
 
-                  <div>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Coaching Feedback</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedCall.coaching_feedback.length > 0 ? selectedCall.coaching_feedback.map((tag, i) => (
-                        <span key={i} className="px-3 py-1 bg-rose-50 text-rose-700 border border-rose-100 rounded text-xs font-semibold">
-                          {tag}
-                        </span>
-                      )) : (
-                        <span className="text-xs text-slate-400 italic">No feedback for this call. High performance.</span>
-                      )}
-                    </div>
+                  <div className="bg-amber-50/50 rounded-xl p-5 border border-amber-100">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-amber-700 mb-3 flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Areas of Improvement
+                    </h4>
+                    {selectedCall.areas_of_improvement.length > 0 ? (
+                      <ul className="space-y-2">
+                        {selectedCall.areas_of_improvement.map((a, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <ArrowRightLeft className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                            {a}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">No improvement areas identified. Excellent performance.</p>
+                    )}
                   </div>
+                </div>
 
-                  <div className="bg-slate-900 rounded-lg p-5 text-white">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <PlayCircle className="w-5 h-5 text-[#E35205]" />
-                        <span className="font-bold text-sm">Call Recording</span>
-                      </div>
-                      <span className="text-xs text-slate-400">{Math.floor(selectedCall.call_duration / 60)}:{(selectedCall.call_duration % 60).toString().padStart(2, '0')}</span>
+                {/* Section 5: Coaching Feedback Tags */}
+                <div className="bg-white rounded-xl p-5 border border-slate-200">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-[#E35205] mb-3 flex items-center gap-2">
+                    <Award className="w-3.5 h-3.5" /> Coaching Feedback
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedCall.coaching_feedback.length > 0 ? selectedCall.coaching_feedback.map((tag, i) => (
+                      <span key={i} className="px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg text-xs font-semibold">
+                        {tag}
+                      </span>
+                    )) : (
+                      <span className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-3 py-1.5 rounded-lg">✓ No coaching feedback needed — high performance call</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Section 6: Call Recording Player */}
+                <div className="bg-slate-900 rounded-xl p-5 text-white">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <PlayCircle className="w-5 h-5 text-[#E35205]" />
+                      <span className="font-bold text-sm">Call Recording</span>
                     </div>
-                    {/* Mock Audio Player */}
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mb-2">
-                      <div className="bg-[#E35205] h-full w-[40%]"></div>
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-500">
-                      <span>02:45</span>
-                      <span>{Math.floor(selectedCall.call_duration / 60)}:{(selectedCall.call_duration % 60).toString().padStart(2, '0')}</span>
-                    </div>
+                    <span className="text-xs text-slate-400">{Math.floor(selectedCall.call_duration / 60)}:{(selectedCall.call_duration % 60).toString().padStart(2, '0')}</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mb-2">
+                    <div className="bg-gradient-to-r from-[#E35205] to-[#FF6B00] h-full w-[40%] rounded-full"></div>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-500">
+                    <span>02:45</span>
+                    <span>{Math.floor(selectedCall.call_duration / 60)}:{(selectedCall.call_duration % 60).toString().padStart(2, '0')}</span>
                   </div>
                 </div>
               </div>

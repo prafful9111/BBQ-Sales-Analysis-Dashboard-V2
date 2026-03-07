@@ -69,9 +69,9 @@ export default function AgentPerformancePage({ data, selectedAgent, setSelectedA
         const pending = agentData.filter(d => d.crs_booking_status === 'Pending').length;
         const avgScore = agentData.reduce((a, c) => a + c.final_score, 0) / total;
         const avgDuration = agentData.reduce((a, c) => a + c.call_duration, 0) / total;
-        const avgComm = agentData.reduce((a, c) => a + c.communication_score, 0) / total;
-        const avgProcess = agentData.reduce((a, c) => a + c.process_adherence_score, 0) / total;
-        const avgSales = agentData.reduce((a, c) => a + c.sales_skills_score, 0) / total;
+        const avgComm = agentData.reduce((a, c) => a + c.customer_experience_score, 0) / total;
+        const avgProcess = agentData.reduce((a, c) => a + c.communication_score, 0) / total;
+        const avgSales = agentData.reduce((a, c) => a + c.sales_strategy_score, 0) / total;
         const highIntent = agentData.filter(d => d.initial_intent_tag === 'High Intent').length;
         const missedOpp = agentData.filter(d => d.initial_intent_tag === 'High Intent' && d.crs_booking_status !== 'Converted').length;
         const tl = agentData[0]?.tl_name || 'N/A';
@@ -333,9 +333,9 @@ export default function AgentPerformancePage({ data, selectedAgent, setSelectedA
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart
                                 data={[
-                                    { skill: 'Communication', score: agentStats.commPct, fill: agentStats.commPct >= 75 ? '#10b981' : agentStats.commPct >= 50 ? '#f59e0b' : '#ef4444' },
-                                    { skill: 'Process', score: agentStats.processPct, fill: agentStats.processPct >= 75 ? '#10b981' : agentStats.processPct >= 50 ? '#f59e0b' : '#ef4444' },
-                                    { skill: 'Sales Skills', score: agentStats.salesPct, fill: agentStats.salesPct >= 75 ? '#10b981' : agentStats.salesPct >= 50 ? '#f59e0b' : '#ef4444' },
+                                    { skill: 'Customer Exp.', score: agentStats.commPct, fill: agentStats.commPct >= 75 ? '#10b981' : agentStats.commPct >= 50 ? '#f59e0b' : '#ef4444' },
+                                    { skill: 'Communication', score: agentStats.processPct, fill: agentStats.processPct >= 75 ? '#10b981' : agentStats.processPct >= 50 ? '#f59e0b' : '#ef4444' },
+                                    { skill: 'Sales Strategy', score: agentStats.salesPct, fill: agentStats.salesPct >= 75 ? '#10b981' : agentStats.salesPct >= 50 ? '#f59e0b' : '#ef4444' },
                                 ]}
                                 layout="vertical"
                                 margin={{ top: 5, right: 40, left: 10, bottom: 5 }}
@@ -693,9 +693,9 @@ export default function AgentPerformancePage({ data, selectedAgent, setSelectedA
                                 <h4 className="text-xs font-bold text-slate-600 mb-3">Skill Scores</h4>
                                 <div className="grid grid-cols-3 gap-3">
                                     {[
-                                        { label: 'Communication', score: selectedCall.communication_score, max: 25 },
-                                        { label: 'Process', score: selectedCall.process_adherence_score, max: 40 },
-                                        { label: 'Sales Skills', score: selectedCall.sales_skills_score, max: 50 },
+                                        { label: 'Customer Experience', score: selectedCall.customer_experience_score, max: 25 },
+                                        { label: 'Communication', score: selectedCall.communication_score, max: 40 },
+                                        { label: 'Sales Strategy', score: selectedCall.sales_strategy_score, max: 50 },
                                     ].map((s, i) => {
                                         const pct = (s.score / s.max) * 100;
                                         return (

@@ -27,6 +27,7 @@ const menuItems = [
   { id: 'agents', name: 'Agent Performance', icon: Users },
   { id: 'calls', name: 'All Calls', icon: PhoneCall },
   { id: 'trends', name: 'Trends', icon: BarChart3 },
+  { id: 'teamleads', name: 'Team Leads', icon: Settings },
 ];
 
 export default function Sidebar({ collapsed, setCollapsed, activePage, setActivePage }: SidebarProps) {
